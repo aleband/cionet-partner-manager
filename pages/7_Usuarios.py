@@ -1,9 +1,11 @@
 import streamlit as st
 import pandas as pd
+from urllib.parse import quote
 from supabase import create_client
 
 st.set_page_config(page_title="Usuários | CIONET Partner Manager", page_icon="👥", layout="wide")
 ROLES = ["admin", "manager", "viewer"]
+APP_URL = "https://cionet-partner-manager.streamlit.app"
 
 
 def make_client():
@@ -62,6 +64,24 @@ def invoke_admin(sb, payload):
     return data
 
 
+def invitation_mailto(invite):
+    role_label = {"admin":"Administrador", "manager":"Gestor", "viewer":"Somente leitura"}.get(invite["role"], invite["role"])
+    subject = "Acesso ao CIONET Partner Manager"
+    body = f"""Olá {invite['full_name']},
+
+Seu acesso ao CIONET Partner Manager foi criado.
+
+URL de acesso: {APP_URL}
+Usuário: {invite['email']}
+Senha temporária: {invite['password']}
+Perfil de acesso: {role_label}
+
+Por segurança, recomendamos alterar sua senha após o primeiro acesso.
+
+CIONET Brasil"""
+    return f"mailto:{invite['email']}?subject={quote(subject)}&body={quote(body)}"
+
+
 sb = restore_client()
 if sb is None:
     login_here()
@@ -75,6 +95,18 @@ if profile["role"] != "admin":
 
 st.title("Usuários & Permissões")
 st.caption("Crie acessos e administre as permissões da equipe CIONET Brasil.")
+
+if st.session_state.get("pending_user_invite"):
+    invite = st.session_state["pending_user_invite"]
+    with st.container(border=True):
+        st.success(f"Usuário {invite['full_name']} criado com sucesso.")
+        st.write("Envie agora as informações de acesso ao novo usuário.")
+        c1, c2 = st.columns([1, 4])
+        c1.link_button("✉️ Enviar e-mail", invitation_mailto(invite), type="primary")
+        if c2.button("Ocultar informações temporárias"):
+            st.session_state.pop("pending_user_invite", None)
+            st.rerun()
+        st.caption("A senha temporária não é gravada no banco pelo CIONET Partner Manager e ficará disponível aqui apenas nesta sessão.")
 
 with st.expander("+ Criar novo usuário", expanded=False):
     with st.form("create_user", clear_on_submit=True):
@@ -94,8 +126,14 @@ with st.expander("+ Criar novo usuário", expanded=False):
                 st.error("As senhas não conferem.")
             else:
                 try:
-                    invoke_admin(sb, {"action":"create", "email":email.strip().lower(), "password":password, "full_name":full_name.strip(), "role":role})
-                    st.success(f"Usuário {full_name} criado com permissão {role}.")
+                    normalized_email = email.strip().lower()
+                    invoke_admin(sb, {"action":"create", "email":normalized_email, "password":password, "full_name":full_name.strip(), "role":role})
+                    st.session_state["pending_user_invite"] = {
+                        "full_name": full_name.strip(),
+                        "email": normalized_email,
+                        "password": password,
+                        "role": role,
+                    }
                     st.rerun()
                 except Exception as e:
                     st.error(f"Não foi possível criar o usuário: {e}")
@@ -146,7 +184,14 @@ with st.expander("Redefinir senha"):
             else:
                 try:
                     invoke_admin(sb, {"action":"reset_password", "user_id":u["id"], "password":new_password})
-                    st.success("Senha redefinida.")
+                    st.session_state["pending_user_invite"] = {
+                        "full_name": u["full_name"] or u["email"],
+                        "email": u["email"],
+                        "password": new_password,
+                        "role": u["role"],
+                    }
+                    st.success("Senha redefinida. Use o botão Enviar e-mail no topo para comunicar a nova senha temporária.")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Não foi possível redefinir a senha: {e}")
 
