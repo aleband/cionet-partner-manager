@@ -5,7 +5,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Usuários | CIONET Partner Manager", page_icon="👥", layout="wide")
 ROLES = ["admin", "manager", "viewer"]
-APP_URL = "https://cionet-partner-manager.streamlit.app"
+APP_URL = "https://cionet-partner-manager-57hw2vdkvkkhaaeoqn3edc.streamlit.app"
 
 
 def make_client():
@@ -76,7 +76,7 @@ Usuário: {invite['email']}
 Senha temporária: {invite['password']}
 Perfil de acesso: {role_label}
 
-Por segurança, recomendamos alterar sua senha após o primeiro acesso.
+No primeiro acesso, o sistema solicitará a criação de uma nova senha pessoal.
 
 CIONET Brasil"""
     return f"mailto:{invite['email']}?subject={quote(subject)}&body={quote(body)}"
@@ -128,12 +128,7 @@ with st.expander("+ Criar novo usuário", expanded=False):
                 try:
                     normalized_email = email.strip().lower()
                     invoke_admin(sb, {"action":"create", "email":normalized_email, "password":password, "full_name":full_name.strip(), "role":role})
-                    st.session_state["pending_user_invite"] = {
-                        "full_name": full_name.strip(),
-                        "email": normalized_email,
-                        "password": password,
-                        "role": role,
-                    }
+                    st.session_state["pending_user_invite"] = {"full_name": full_name.strip(), "email": normalized_email, "password": password, "role": role}
                     st.rerun()
                 except Exception as e:
                     st.error(f"Não foi possível criar o usuário: {e}")
@@ -184,12 +179,7 @@ with st.expander("Redefinir senha"):
             else:
                 try:
                     invoke_admin(sb, {"action":"reset_password", "user_id":u["id"], "password":new_password})
-                    st.session_state["pending_user_invite"] = {
-                        "full_name": u["full_name"] or u["email"],
-                        "email": u["email"],
-                        "password": new_password,
-                        "role": u["role"],
-                    }
+                    st.session_state["pending_user_invite"] = {"full_name": u["full_name"] or u["email"], "email": u["email"], "password": new_password, "role": u["role"]}
                     st.success("Senha redefinida. Use o botão Enviar e-mail no topo para comunicar a nova senha temporária.")
                     st.rerun()
                 except Exception as e:
