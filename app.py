@@ -5,7 +5,7 @@ from dateutil.relativedelta import relativedelta
 from supabase import create_client
 import io
 
-st.set_page_config(page_title="CIONET Partner Manager", page_icon="📊", layout="wide")
+st.set_page_config(page_title="CIONET Partner Manager", page_icon="Logo CIONET.png", layout="wide")
 
 JOURNEYS = {
     "Engage Partner": {"Quests / What's Next":2,"Social Galas":1,"Representantes":1,"Conselho Assessor":0,"Painel com Especialista":1,"Client Case":0,"Executive Coffee Dialogue":1,"Executive Roundtable":0,"Elite Roundtable":0,"Hub Regional":0},
@@ -155,31 +155,31 @@ with tabs[1]:
 with tabs[2]:
     st.subheader("Calendário e consumo")
     if not partners.empty and not events.empty:
-        name=st.selectbox("Business Partner",partners["name"].tolist(),key="calendar_partner");partner=partners[partners["name"]==name].iloc[0].to_dict();rows=[]
+        name=st.selectbox("Business Partner",partners["name"].tolist(),key="calendar_partner");partner=partners[partners["name"]==name].iloc[0].to_dict();matrix=[]
         for _,event in events.iterrows():
-            base=event_applicability(partner,event.to_dict());rows.append([event["name"],event["event_type"],format_date(event["event_date"]),event["location"],apply_usage_status(base,usage,partner["id"],event["id"])])
-        st.dataframe(pd.DataFrame(rows,columns=["Evento","Tipo","Data","Local","Status"]),use_container_width=True,hide_index=True)
+            base=event_applicability(partner,event.to_dict());final=apply_usage_status(base,usage,partner["id"],event["id"]);matrix.append({"Evento":event["name"],"Tipo":event["event_type"],"Data":format_date(event["event_date"]),"Local":event["location"],"Status":final})
+        st.dataframe(pd.DataFrame(matrix),use_container_width=True,hide_index=True)
         if can_edit:
-            st.subheader("Registrar entrega / participação")
-            with st.form("usage"):
-                labels=(events["name"]+" | "+events["event_date"].astype(str)).tolist();label=st.selectbox("Evento",labels);event=events.iloc[labels.index(label)];benefits=[k for k,v in partner_entitlements(partner).items() if v];benefit=st.selectbox("Entregável",benefits);status=st.selectbox("Status",["Agendado","Utilizado"]);executive=st.text_input("Executivo / participante");notes=st.text_area("Observações")
-                if st.form_submit_button("Registrar",type="primary"):sb.table("usage").insert({"partner_id":int(partner["id"]),"event_id":int(event["id"]),"benefit":benefit,"status":status,"executive":executive,"notes":notes}).execute();st.success("Registro incluído.");st.rerun()
-        st.subheader("Histórico registrado")
-        pu=usage[usage["partner_id"]==partner["id"]].copy() if not usage.empty else pd.DataFrame()
-        if pu.empty:st.info("Nenhuma utilização registrada para este parceiro.")
-        else:
-            lookup=events[["id","name","event_date","location"]].rename(columns={"id":"event_id","name":"Evento","event_date":"Data","location":"Local"});hist=pu.merge(lookup,on="event_id",how="left");hist["Data"]=hist["Data"].apply(format_date);st.dataframe(hist[["Evento","Data","benefit","status","executive","notes"]].rename(columns={"benefit":"Entregável","status":"Status","executive":"Executivo","notes":"Observações"}),use_container_width=True,hide_index=True)
+            with st.expander("Registrar consumo ou agendamento"):
+                with st.form("usage_form"):
+                    event_name=st.selectbox("Evento",events["name"].tolist());status_u=st.selectbox("Status",["Agendado","Utilizado"]);benefit=st.selectbox("Entregável",[k for k,v in partner_entitlements(partner).items() if v>0]);executive=st.text_input("Executivo / participante");notes_u=st.text_area("Observações",key="usage_notes")
+                    if st.form_submit_button("Registrar",type="primary"):
+                        ev=events[events["name"]==event_name].iloc[0]
+                        try:sb.table("usage").insert({"partner_id":partner["id"],"event_id":ev["id"],"benefit":benefit,"status":status_u,"executive":executive or None,"notes":notes_u or None}).execute();st.success("Consumo registrado.");st.rerun()
+                        except Exception as e:st.error(f"Não foi possível registrar: {e}")
+        hist=usage[usage["partner_id"]==partner["id"]] if not usage.empty else pd.DataFrame()
+        if not hist.empty:
+            evmap=events.set_index("id")["name"].to_dict();hist=hist.copy();hist["Evento"]=hist["event_id"].map(evmap);st.subheader("Histórico registrado");st.dataframe(hist[["Evento","benefit","status","executive","notes"]].rename(columns={"benefit":"Entregável","status":"Status","executive":"Executivo","notes":"Observações"}),use_container_width=True,hide_index=True)
 with tabs[3]:
-    st.subheader("Matriz de jornadas");rows=[]
-    for journey,items in JOURNEYS.items():
-        for item,qty in items.items():
-            if qty:rows.append([journey,item,qty])
-    st.dataframe(pd.DataFrame(rows,columns=["Jornada","Entregável","Quantidade"]),use_container_width=True,hide_index=True);st.info("Contratos históricos preservam os benefícios vendidos à época. Palo Alto e Bridge & Co + Freshworks mantêm a exceção histórica de Conselho.")
+    st.subheader("Matriz oficial de jornadas")
+    for journey,ent in JOURNEYS.items():
+        st.markdown(f"### {journey}");st.dataframe(pd.DataFrame([{"Entregável":k,"Quantidade":v} for k,v in ent.items() if v>0]),use_container_width=True,hide_index=True)
+    st.info("Contratos históricos podem preservar benefícios anteriores. Bridge & Co + Freshworks e Palo Alto mantêm Conselho conforme registrado no contrato histórico.")
 with tabs[4]:
-    st.subheader("Exportar controle");output=io.BytesIO();export_partners=partners.drop(columns=["end_dt","renewal_dt","Status","Dias p/ renovação"],errors="ignore")
-    with pd.ExcelWriter(output,engine="openpyxl") as writer:
-        export_partners.to_excel(writer,index=False,sheet_name="Parceiros");events.to_excel(writer,index=False,sheet_name="Calendario");usage.to_excel(writer,index=False,sheet_name="Utilizacao");mr=[]
-        for journey,items in JOURNEYS.items():
-            for benefit,qty in items.items():mr.append([journey,benefit,qty])
-        pd.DataFrame(mr,columns=["Jornada","Entregável","Quantidade"]).to_excel(writer,index=False,sheet_name="Matriz Jornadas")
-    st.download_button("Baixar controle completo em Excel",output.getvalue(),f"CIONET_Partner_Manager_{date.today().isoformat()}.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.subheader("Exportar controle")
+    if not partners.empty:
+        out=partners.copy();out["start_date"]=out["start_date"].apply(format_date);out["end_date"]=out["end_date"].apply(format_date);out["renewal_date"]=out["renewal_date"].apply(format_date);csv=out.drop(columns=[c for c in ["end_dt","renewal_dt"] if c in out.columns]).to_csv(index=False).encode("utf-8-sig");st.download_button("Baixar carteira CSV",csv,"cionet_carteira.csv","text/csv")
+        buffer=io.BytesIO()
+        with pd.ExcelWriter(buffer,engine="openpyxl") as writer:
+            out.drop(columns=[c for c in ["end_dt","renewal_dt"] if c in out.columns]).to_excel(writer,index=False,sheet_name="Carteira");events.to_excel(writer,index=False,sheet_name="Calendario");usage.to_excel(writer,index=False,sheet_name="Consumo")
+        st.download_button("Baixar controle Excel",buffer.getvalue(),"cionet_partner_manager.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
