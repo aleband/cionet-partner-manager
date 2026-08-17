@@ -45,11 +45,21 @@ def login_here():
     st.stop()
 
 
+def normalize_function_response(response):
+    if isinstance(response, dict):
+        return response
+    data = getattr(response, "data", None)
+    if isinstance(data, dict):
+        return data
+    return {}
+
+
 def invoke_admin(sb, payload):
     response = sb.functions.invoke("admin-users", invoke_options={"body": payload})
-    if isinstance(response, dict) and response.get("error"):
-        raise Exception(response["error"])
-    return response
+    data = normalize_function_response(response)
+    if data.get("error"):
+        raise Exception(data["error"])
+    return data
 
 
 sb = restore_client()
@@ -92,7 +102,7 @@ with st.expander("+ Criar novo usuário", expanded=False):
 
 try:
     result = invoke_admin(sb, {"action":"list"})
-    users = pd.DataFrame(result.get("users", []) if isinstance(result, dict) else [])
+    users = pd.DataFrame(result.get("users", []))
 except Exception as e:
     st.error(f"Não foi possível carregar os usuários: {e}")
     st.stop()
