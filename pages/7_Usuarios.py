@@ -1,3 +1,4 @@
+import json
 import streamlit as st
 import pandas as pd
 from urllib.parse import quote
@@ -48,17 +49,56 @@ def login_here():
 
 
 def normalize_function_response(response):
+    """Normaliza respostas do supabase-py (dict, bytes, str ou FunctionResponse.data)."""
+    if response is None:
+        return {}
     if isinstance(response, dict):
         return response
+    if isinstance(response, bytes):
+        try:
+            return json.loads(response.decode("utf-8"))
+        except Exception:
+            return {}
+    if isinstance(response, str):
+        try:
+            return json.loads(response)
+        except Exception:
+            return {}
+
     data = getattr(response, "data", None)
     if isinstance(data, dict):
         return data
+    if isinstance(data, bytes):
+        try:
+            return json.loads(data.decode("utf-8"))
+        except Exception:
+            return {}
+    if isinstance(data, str):
+        try:
+            return json.loads(data)
+        except Exception:
+            return {}
+
+    try:
+        dumped = response.model_dump()
+        if isinstance(dumped, dict):
+            inner = dumped.get("data", dumped)
+            if isinstance(inner, dict):
+                return inner
+            if isinstance(inner, bytes):
+                return json.loads(inner.decode("utf-8"))
+            if isinstance(inner, str):
+                return json.loads(inner)
+    except Exception:
+        pass
     return {}
 
 
 def invoke_admin(sb, payload):
     response = sb.functions.invoke("admin-users", invoke_options={"body": payload})
     data = normalize_function_response(response)
+    if not data:
+        raise Exception("A função administrativa respondeu sem dados. Atualize a página e tente novamente.")
     if data.get("error"):
         raise Exception(data["error"])
     return data
@@ -133,20 +173,32 @@ with st.expander("+ Criar novo usuário", expanded=False):
                 except Exception as e:
                     st.error(f"Não foi possível criar o usuário: {e}")
 
+refresh_col, _ = st.columns([1, 5])
+if refresh_col.button("↻ Atualizar lista"):
+    st.rerun()
+
 try:
     result = invoke_admin(sb, {"action":"list"})
-    users = pd.DataFrame(result.get("users", []))
+    raw_users = result.get("users")
+    if raw_users is None:
+        raise Exception("A resposta da função não contém a lista de usuários.")
+    users = pd.DataFrame(raw_users)
 except Exception as e:
     st.error(f"Não foi possível carregar os usuários: {e}")
     st.stop()
 
 if users.empty:
-    st.info("Nenhum usuário encontrado.")
+    st.warning("A função respondeu corretamente, mas não retornou usuários cadastrados.")
     st.stop()
 
-st.subheader("Usuários cadastrados")
+required_cols = ["id", "email", "full_name", "role", "last_sign_in_at"]
+for col in required_cols:
+    if col not in users.columns:
+        users[col] = None
+
+st.subheader(f"Usuários cadastrados ({len(users)})")
 display = users.copy()
-display["Permissão"] = display["role"].map({"admin":"Administrador", "manager":"Gestor", "viewer":"Somente leitura"})
+display["Permissão"] = display["role"].map({"admin":"Administrador", "manager":"Gestor", "viewer":"Somente leitura"}).fillna(display["role"])
 display["Último acesso"] = pd.to_datetime(display["last_sign_in_at"], errors="coerce").dt.strftime("%d/%m/%Y %H:%M").fillna("Nunca")
 st.dataframe(display[["full_name","email","Permissão","Último acesso"]].rename(columns={"full_name":"Nome", "email":"E-mail"}), use_container_width=True, hide_index=True)
 
@@ -180,7 +232,6 @@ with st.expander("Redefinir senha"):
                 try:
                     invoke_admin(sb, {"action":"reset_password", "user_id":u["id"], "password":new_password})
                     st.session_state["pending_user_invite"] = {"full_name": u["full_name"] or u["email"], "email": u["email"], "password": new_password, "role": u["role"]}
-                    st.success("Senha redefinida. Use o botão Enviar e-mail no topo para comunicar a nova senha temporária.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Não foi possível redefinir a senha: {e}")
