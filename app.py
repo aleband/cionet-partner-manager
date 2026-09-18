@@ -726,7 +726,8 @@ with tabs[2]:
                     notes_u = st.text_area("Observações", key="usage_notes")
 
                     if st.form_submit_button("Registrar", type="primary"):
-                        event = events[events["name"] == event_name].iloc[0]
+                        # Convert pandas scalars to native Python values for JSON.
+                        event = events[events["name"] == event_name].iloc[0].to_dict()
                         try:
                             sb.table("usage").insert(
                                 {
